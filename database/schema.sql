@@ -225,6 +225,27 @@ CREATE TABLE IF NOT EXISTS model_predictions (
 CREATE INDEX IF NOT EXISTS idx_mp_date_model
     ON model_predictions (timestamp DESC, model_type);
 
+-- ── News / Sentiment ────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS news_articles (
+    id              SERIAL          PRIMARY KEY,
+    published_at    TIMESTAMPTZ     NOT NULL,
+    fetched_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    source          TEXT            NOT NULL,  -- moneycontrol / economictimes / nse / livemint
+    title           TEXT            NOT NULL,
+    url             TEXT            UNIQUE,
+    summary         TEXT,
+    symbols         TEXT[],                    -- {NIFTY, BANKNIFTY, RELIANCE, ...}
+    category        TEXT,                      -- rbi_policy / earnings / macro / market / global
+    sentiment_score DOUBLE PRECISION,          -- -1.0 (very bearish) to +1.0 (very bullish)
+    sentiment_label TEXT,                      -- bearish / neutral / bullish
+    impact_level    TEXT DEFAULT 'low',        -- low / medium / high / critical
+    keywords        TEXT[]
+);
+
+CREATE INDEX IF NOT EXISTS idx_news_published ON news_articles (published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_source ON news_articles (source, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_symbols ON news_articles USING gin (symbols);
+
 -- ── Daily Performance ────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS daily_performance (
     date            DATE            PRIMARY KEY,

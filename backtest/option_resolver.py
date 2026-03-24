@@ -13,6 +13,7 @@ import pandas as pd
 
 from database.db import read_sql
 from utils.logger import get_logger
+from strategy.vol_surface import VolSurfaceModel
 
 logger = get_logger("option_resolver")
 
@@ -199,6 +200,99 @@ def resolve_option_at_entry(
         "dte": dte,
         "premium_df": premium_df,
     }
+
+
+def resolve_option_with_vol_surface(
+    index_price: float,
+    timestamp: pd.Timestamp,
+    direction: str,
+    vol_model: VolSurfaceModel,
+    strike_gap: int = 50,
+) -> dict:
+    """
+    Resolve the optimal option contract using the volatility surface model.
+    Falls back to ATM if vol surface selection fails.
+    
+    Returns same dict as resolve_option_at_entry plus vol_surface_info.
+    """
+    ref_date = timestamp.date() if hasattr(timestamp, "date") else timestamp
+    expiry = get_nearest_expiry(ref_date)
+    if expiry is None:
+        return resolve_option_at_entry(index_price, timestamp, direction, strike_gap)
+
+    # Load all option data for this expiry+day to build IV surface
+    atm = get_atm_strike(index_price, strike_gap)
+    exp_code = expiry.strftime("%y%m%d")
+    opt_type = "CE" if direction == "CALL" else "PE"
+
+    # Gather premium data for nearby strikes
+    option_rows = []
+    for offset in range(-vol_model.max_strike_offset, vol_model.max_strike_offset + 1):
+        for ot in ["CE", "PE"]:
+            trial_strike = atm + offset * strike_gap
+            sym = build_option_symbol(expiry, trial_strike, ot)
+            pdf = load_option_premiums_for_day(sym, ref_date)
+            if pdf.empty:
+                continue
+            # Get premium at timestamp
+            ts = pd.to_datetime(timestamp)
+            mask = (pdf["timestamp"] - ts).abs() <= pd.Timedelta(minutes=1)
+            matching = pdf[mask]
+            if matching.empty:
+                continue
+            row = matching.iloc[0]
+            option_rows.append({
+                "symbol": sym,
+                "close": float(row["premium"]),
+                "oi": int(row.get("oi", 0)),
+                "volume": int(row.get("volume", 0)),
+            })
+
+    if not option_rows:
+        return resolve_option_at_entry(index_price, timestamp, direction, strike_gap)
+
+    option_df = pd.DataFrame(option_rows)
+
+    # Use vol surface model to select optimal strike
+    selection = vol_model.select_optimal_strike(
+        spot=index_price,
+        direction=direction,
+        expiry=expiry,
+        ref_date=ref_date,
+        option_data=option_df,
+    )
+
+    if selection is None:
+        return resolve_option_at_entry(index_price, timestamp, direction, strike_gap)
+
+    # Resolve the selected strike
+    selected_strike = selection["strike"]
+    sym = build_option_symbol(expiry, selected_strike, opt_type)
+    pdf = load_option_premiums_for_day(sym, ref_date)
+
+    if pdf.empty:
+        return resolve_option_at_entry(index_price, timestamp, direction, strike_gap)
+
+    ts = pd.to_datetime(timestamp)
+    mask = (pdf["timestamp"] - ts).abs() <= pd.Timedelta(minutes=1)
+    matching = pdf[mask]
+    if matching.empty:
+        return resolve_option_at_entry(index_price, timestamp, direction, strike_gap)
+
+    entry_premium = float(matching.iloc[0]["premium"])
+    dte = get_days_to_expiry(ref_date, expiry)
+
+    result = {
+        "symbol": sym,
+        "expiry": expiry,
+        "strike": selected_strike,
+        "opt_type": opt_type,
+        "entry_premium": entry_premium,
+        "dte": dte,
+        "premium_df": pdf,
+        "vol_surface_info": selection,
+    }
+    return result
 
 
 def clear_cache():

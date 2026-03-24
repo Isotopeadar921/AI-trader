@@ -37,6 +37,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 load_dotenv()
 
+import json
+import threading
 import pandas as pd
 
 from config.settings import (
@@ -47,7 +49,7 @@ from config.settings import (
 )
 from data.truedata_adapter import TrueDataAdapter
 from data.tick_collector import TickCollector
-from database.db import write_df, read_sql, get_engine
+from database.db import write_df, upsert_candles, read_sql, get_engine
 from utils.logger import get_logger
 
 # ── Setup logging to file ────────────────────────────────────────────────────
@@ -71,12 +73,37 @@ candle_buffer: dict = {}   # symbol -> list of ticks for current minute
 last_minute: dict = {}     # symbol -> last completed minute timestamp
 running = True
 
+# Live price cache: symbol -> {price, ts} updated on every tick
+live_price_cache: dict = {}
+LIVE_CACHE_FILE = Path("/tmp/td_live_prices.json")
+
 
 def signal_handler(signum, frame):
     global running
     logger.info(f"Received signal {signum}, shutting down gracefully...")
     running = False
 
+
+def _atexit_cleanup():
+    """Ensure WebSocket is disconnected on exit to avoid 'User Already Connected'."""
+    global running
+    running = False
+    try:
+        if td and hasattr(td, '_ws_connected') and td._ws_connected:
+            logger.info("atexit: disconnecting WebSocket...")
+            td.ws_stop_streaming()
+            td.ws_disconnect()
+    except Exception as e:
+        logger.debug(f"atexit cleanup error: {e}")
+    # Clean up cache file
+    try:
+        LIVE_CACHE_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+import atexit
+atexit.register(_atexit_cleanup)
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
@@ -177,20 +204,41 @@ def aggregate_candle(symbol: str, ticks: list) -> dict:
     }
 
 
+def _flush_price_cache():
+    """Write live_price_cache to disk every second for Flask to read."""
+    while running:
+        try:
+            tmp = LIVE_CACHE_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(live_price_cache))
+            tmp.replace(LIVE_CACHE_FILE)
+        except Exception:
+            pass
+        time.sleep(1)
+
+
 def on_tick(tick: dict):
     """Process each incoming tick: buffer for candle aggregation."""
-    global candle_buffer, last_minute
+    global candle_buffer, last_minute, live_price_cache
 
     symbol = tick.get("symbol", "")
     ts = tick.get("timestamp", datetime.now())
     minute_ts = ts.replace(second=0, microsecond=0)
 
     # Map spot symbol back to futures symbol for consistency
+    original_symbol = symbol
     symbol_map = {v: k for k, v in TD_INDEX_SPOT_SYMBOLS.items()}
     if symbol in symbol_map:
         # Store as NIFTY-I internally
         tick["symbol"] = TD_INDEX_FUTURES_SYMBOLS.get(symbol_map[symbol], symbol)
         symbol = tick["symbol"]
+
+    # Update live price cache immediately (cache both original and remapped names)
+    price = tick.get("price", 0)
+    if price and price > 0:
+        entry = {"price": price, "ts": ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)}
+        live_price_cache[symbol] = entry
+        if original_symbol != symbol:
+            live_price_cache[original_symbol] = entry
 
     # Initialize buffer for new symbols
     if symbol not in candle_buffer:
@@ -204,7 +252,7 @@ def on_tick(tick: dict):
             candle = aggregate_candle(symbol, prev_ticks)
             if candle:
                 try:
-                    write_df(pd.DataFrame([candle]), "minute_candles")
+                    upsert_candles(pd.DataFrame([candle]))
                 except Exception as e:
                     logger.error(f"Failed to write candle for {symbol}: {e}")
         candle_buffer[symbol] = []
@@ -220,7 +268,7 @@ def flush_remaining_candles():
             candle = aggregate_candle(symbol, ticks)
             if candle:
                 try:
-                    write_df(pd.DataFrame([candle]), "minute_candles")
+                    upsert_candles(pd.DataFrame([candle]))
                 except Exception:
                     pass
     candle_buffer.clear()
@@ -330,6 +378,11 @@ def main():
         on_tick(tick)
 
     td.ws_start_streaming(combined_handler)
+
+    # Start background thread to flush live price cache to disk every second
+    cache_thread = threading.Thread(target=_flush_price_cache, daemon=True)
+    cache_thread.start()
+    logger.info(f"Live price cache flushing to {LIVE_CACHE_FILE}")
 
     logger.info("Streaming started. Collecting ticks until market close...")
     print(f"  Collecting ticks... (log: {log_file})")

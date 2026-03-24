@@ -1,126 +1,90 @@
-# AI-Powered Options Trading System
+# AI Trader — NSE F&O Algorithmic Trading System
 
-> **Intraday NSE F&O options trading system** combining dual-model ML architecture, institutional options flow analysis, and regime-adaptive strategies for NIFTY and BANKNIFTY.
+> **Full-stack intraday options trading system** — ML regime detection, RL exit agents, tick-level backtesting, and a live retro terminal dashboard for NIFTY.
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Next.js 15](https://img.shields.io/badge/Next.js-15-black.svg)](https://nextjs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
-## 🎯 Overview
+## Overview
 
-This is a **production-ready algorithmic trading system** designed for Indian equity derivatives (NSE F&O). It processes tick-level and minute-level market data through a sophisticated ML pipeline to generate high-probability intraday options trades.
+Intraday NSE F&O options trading system for NIFTY. Combines LightGBM regime detection, RL exit agents, tick-level backtesting, and a live retro terminal dashboard.
 
-### Key Features
-
-- **Dual-Model ML Architecture**
-  - **Macro Model**: XGBoost trained on 6 months of 1-minute candle data (18 technical indicators)
-  - **Micro Model**: XGBoost trained on 5 days of tick data (order flow microstructure)
-  - Walk-forward validation to prevent overfitting
-
-- **Institutional Options Flow Detection**
-  - Long Build Up, Short Covering, Long Unwinding, Short Build Up
-  - Gamma Pinning detection
-  - Put-Call Ratio (PCR) analysis
-  - OI change tracking and volume spike detection
-
-- **Market Regime Detection**
-  - Trending Bull/Bear, Sideways, High/Low Volatility
-  - Regime-adaptive strategy selection
-  - EMA trend + ATR percentile + range compression
-
-- **Three Core Strategies**
-  1. **VWAP Momentum Breakout** — Bullish breakouts (Buy ATM Call)
-  2. **Bearish Momentum** — Bearish breakdowns (Buy ATM Put)
-  3. **Mean Reversion** — Extreme RSI + Bollinger Band touches
-
-- **Composite Trade Scoring**
-  ```
-  Trade Score = 0.5 × ML Probability + 0.3 × Options Flow + 0.2 × Technical Strength
-  ```
-  Top 3 trades selected per scan cycle (30-60s)
-
-- **Robust Risk Management**
-  - 1% risk per trade
-  - Max 5 trades/day
-  - 5% daily loss cap
-  - ATR-based stop loss and targets
-  - Exchange-managed SL-M orders
+**Stack:** Python 3.13 · Flask API · Next.js 15 · PostgreSQL · LightGBM · PyTorch DQN · TrueData · Recharts
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         DATA LAYER                              │
-│  TrueData API → Tick Collector → Aggregation Engine            │
-│  (6mo 1m bars + 5d ticks) → TimescaleDB → Feature Store        │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                      FEATURE LAYER                              │
-│  Macro: RSI, MACD, EMA, VWAP, Bollinger, ATR, Volume, PCR, IV  │
-│  Micro: Bid-Ask Spread, Order Imbalance, Tick Momentum         │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                    INTELLIGENCE LAYER                           │
-│  Regime Detector → Strategy Engine → Options Flow Detector     │
-│  Macro Model (1m) + Micro Model (tick) → Predictor             │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                     EXECUTION LAYER                             │
-│  Trade Scorer → Risk Manager → Order Manager → Kite Connect    │
-│  (Entry + SL-M + Target orders)                                │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  DATA LAYER                                                  │
+│  TrueData → tick_collector / ingest_historical → PostgreSQL  │
+│  NIFTY-I 1m candles + options tick data                      │
+└──────────────────────┬───────────────────────────────────────┘
+                       ↓
+┌──────────────────────────────────────────────────────────────┐
+│  INTELLIGENCE LAYER                                          │
+│  RegimeDetector (EMA/ATR/range) → LightGBM Macro Model      │
+│  StrategyPredictor (per-strategy LightGBM) → TradeScorer     │
+│  VolSurface (IV-based strike selection)                      │
+└──────────────────────┬───────────────────────────────────────┘
+                       ↓
+┌──────────────────────────────────────────────────────────────┐
+│  RL EXIT AGENTS                                              │
+│  Tabular Q-Learning (247K episodes, 11,606 states)           │
+│  DQN Agent (64→64→32 LayerNorm, Double DQN + Huber)          │
+│  Actions: HOLD / EXIT / TIGHTEN_SL                           │
+└──────────────────────┬───────────────────────────────────────┘
+                       ↓
+┌──────────────────────────────────────────────────────────────┐
+│  EXECUTION LAYER                                             │
+│  KellySizer → RiskManager → OrderManager → Kite Connect      │
+│  3 risk profiles: LOW / MEDIUM / HIGH                        │
+└──────────────────────┬───────────────────────────────────────┘
+                       ↓
+┌──────────────────────────────────────────────────────────────┐
+│  DASHBOARD LAYER                                             │
+│  Flask API (port 5050) ← → Next.js UI (port 3000)           │
+│  Retro terminal theme · Live P&L · Charts · Backtest viewer  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📊 Data Requirements
+## Prerequisites
 
-| Data Type | Source | Duration | Purpose |
-|-----------|--------|----------|---------|
-| **1-minute candles** | TrueData | 6 months | Macro Model training |
-| **Tick data** | TrueData | 5 days | Micro Model training |
-| **Option chain** | TrueData | Real-time | Options flow analysis |
-| **Live ticks** | Kite WebSocket | Real-time | Trade execution |
-
-**Symbols**: NIFTY, BANKNIFTY (expandable to FINNIFTY, MIDCPNIFTY)
+| Requirement | Version | Notes |
+|---|---|---|
+| Python | 3.13+ | |
+| Node.js | 18+ | For dashboard |
+| PostgreSQL | 14+ | With TimescaleDB extension |
+| TrueData API | — | For market data |
+| Zerodha Kite Connect | — | For live order execution |
 
 ---
 
-## 🚀 Quick Start
+## Setup
 
-### Prerequisites
-
-- Python 3.13+
-- PostgreSQL with TimescaleDB extension
-- TrueData API subscription
-- Zerodha Kite Connect API credentials
-
-### Installation
+### 1. Clone & Python environment
 
 ```bash
-# Clone the repository
 git clone https://github.com/yourusername/ai-trader.git
 cd ai-trader
 
-# Create virtual environment
 python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-# Install dependencies
 pip install -r requirements.txt
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your credentials
 ```
 
-### Configuration
+### 2. Environment variables
+
+```bash
+cp .env.example .env
+```
 
 Edit `.env`:
 
@@ -136,20 +100,20 @@ TRUEDATA_PASSWORD=your_password
 KITE_API_KEY=your_api_key
 KITE_ACCESS_TOKEN=your_access_token
 
-# Trading Parameters
+# Trading
 INITIAL_CAPITAL=50000
 RISK_PER_TRADE=0.01
 MAX_TRADES_PER_DAY=5
 MAX_DAILY_LOSS=0.05
 ```
 
-### Database Setup
+### 3. Database setup
 
 ```bash
-# Install TimescaleDB (macOS)
+# macOS: install TimescaleDB
 brew install timescaledb
 
-# Initialize database
+# Create DB and enable extension
 psql -U postgres -c "CREATE DATABASE trading_db;"
 psql -U postgres -d trading_db -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
 
@@ -157,238 +121,175 @@ psql -U postgres -d trading_db -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
 psql -U postgres -d trading_db -f database/schema.sql
 ```
 
----
+### 4. Dashboard dependencies
 
-## 💻 Usage
-
-### 5 Operating Modes
-
-#### 1. Mock Mode (Development/Testing)
 ```bash
-python main.py mock
-```
-Generates synthetic data and runs the full feature pipeline in-memory. No database required.
-
-#### 2. Ingest Mode (Data Loading)
-```bash
-python main.py ingest
-```
-Loads 6 months of 1-minute bars + 5 days of tick data from TrueData into TimescaleDB.
-
-#### 3. Train Mode (ML Training)
-```bash
-python main.py train
-```
-Trains both Macro and Micro models using walk-forward validation. **Only use with real TrueData.**
-
-#### 4. Backtest Mode (Strategy Testing)
-```bash
-python main.py backtest
-```
-Runs full strategy backtest on mock data. Tests signal generation, scoring, and SL/target simulation.
-
-**Results are automatically exported to `backtest_results/` directory in 3 formats:**
-- **CSV** (`*_trades.csv`): All trades with entry/exit prices, P&L, scores - open in Excel
-- **JSON** (`*_results.json`): Full results including summary metrics and trade details - for programmatic analysis
-- **TXT** (`*_report.txt`): Human-readable formatted report with summary and trade-by-trade breakdown
-
-#### 5. Live Mode (Production Trading)
-```bash
-python main.py live
-```
-Real-time trading loop:
-```
-while market_open:
-    fetch data → update indicators → detect regime
-    → generate signals → compute options flow → run ML model
-    → rank trades → execute top 3 trades
-    sleep 30-60s
+cd dashboard
+npm install
 ```
 
 ---
 
-## 📈 Performance Metrics
+## Running the System
 
-The backtest engine computes:
+Three processes need to run simultaneously. Open three terminals:
 
-- **Win Rate** — % of profitable trades
-- **Profit Factor** — Gross wins / Gross losses
-- **Sharpe Ratio** — Risk-adjusted returns
-- **Max Drawdown** — Largest peak-to-trough decline
-- **Expectancy** — Average P&L per trade
-- **Avg Win / Avg Loss** — Trade distribution
-
-Example output:
+### Terminal 1 — Flask API (port 5050)
+```bash
+# From project root, with .venv activated
+python frontend/app.py
 ```
-==================================================
-BACKTEST RESULTS
-==================================================
-  Total trades:  625
-  Wins:          260
-  Losses:        365
-  Win rate:      41.6%
-  Gross PnL:     ₹-8,990.97
-  Profit factor: 0.94
-  Max drawdown:  ₹14,355.88
-  Sharpe ratio:  -0.47
-  Expectancy:    ₹-14.39/trade
-  Avg win:       ₹557.37
-  Avg loss:      ₹-421.66
-==================================================
+
+### Terminal 2 — Next.js Dashboard (port 3000)
+```bash
+cd dashboard
+npm run dev
 ```
+
+### Terminal 3 — (Optional) Paper trading engine
+```bash
+# Replay a specific day
+python scripts/paper_trade.py --replay 2026-03-20
+
+# Live paper trading via TrueData WebSocket
+python scripts/paper_trade.py
+```
+
+Open **http://localhost:3000** in your browser.
 
 ---
 
-## 🛡️ Risk Management
+## Scripts Reference
 
-| Rule | Value |
-|------|-------|
-| Risk per trade | 1% of capital |
-| Max trades/day | 5 |
-| Max daily loss | 5% of capital |
-| Stop loss | 1.5 × ATR |
-| Target | 2.0 × ATR |
-| Position sizing | Risk amount / Stop distance |
-
-**Stop Loss Type**: Exchange-managed SL-M orders (no manual monitoring required)
+| Script | Purpose |
+|---|---|
+| `python scripts/tick_replay_backtest.py --risk high` | Full tick-level backtest, HIGH risk |
+| `python scripts/tick_replay_backtest.py --risk medium` | Full tick-level backtest, MEDIUM risk |
+| `python scripts/forward_test.py --risk medium` | Out-of-sample forward test |
+| `python scripts/train_rl_exit.py --epochs 15` | Train tabular Q-learning exit agent |
+| `python scripts/train_dqn_exit.py --epochs 10` | Train DQN neural net exit agent |
+| `python scripts/paper_trade.py --replay 2026-03-20` | Paper trade replay for a day |
+| `python scripts/paper_trade.py` | Live paper trading (TrueData WebSocket) |
+| `python scripts/ingest_historical.py` | Ingest historical 1m candles from TrueData |
+| `python scripts/collect_ticks.py` | Collect live tick data |
+| `python scripts/retrain_models.py` | Retrain all ML models |
+| `python frontend/app.py` | Start Flask API backend (port 5050) |
+| `cd dashboard && npm run dev` | Start Next.js dashboard (port 3000) |
 
 ---
 
-## 📁 Project Structure
+## Risk Profiles
+
+Three configurable risk profiles, selectable from the dashboard:
+
+| Profile | Lot Size | Stop Loss | Target | Max Trades/Day |
+|---|---|---|---|---|
+| LOW | 1× | 1.5% | 2.0% | 3 |
+| MEDIUM | 2× | 2.0% | 3.0% | 4 |
+| HIGH | 3× | 2.5% | 4.0% | 5 |
+
+Position sizing uses **half-Kelly Criterion** based on rolling 20-trade win rate, capped by profile limits.
+
+---
+
+## ML Models
+
+| Model | Type | Purpose |
+|---|---|---|
+| `models/saved/macro_model.pkl` | LightGBM | Bull/Bear regime probability (80+ features, AUC 0.98) |
+| `models/saved/strategy_*.pkl` | LightGBM | Per-strategy success probability |
+| `models/saved/rl_exit_agent.pkl` | Tabular Q-Table | Exit timing (HOLD/EXIT/TIGHTEN) |
+| `models/saved/dqn_exit_agent.pt` | PyTorch DQN | Neural net exit agent |
+| `strategy/vol_surface.py` | Scoring | IV-based strike selection |
+
+---
+
+## Project Structure
 
 ```
 ai-trader/
-├── backtest/           # Backtesting engine
-│   └── backtest_engine.py
-├── config/             # Configuration & settings
-│   └── settings.py
-├── data/               # Data ingestion & aggregation
-│   ├── truedata_adapter.py
-│   ├── market_stream.py
-│   ├── tick_collector.py
-│   ├── aggregator.py
-│   └── mock_data.py
-├── database/           # TimescaleDB schema & connection
-│   ├── schema.sql
-│   └── db.py
-├── docs/               # Documentation
-├── execution/          # Order management & broker API
-│   ├── order_manager.py
-│   └── broker_adapter.py
-├── features/           # Feature engineering
-│   ├── indicators.py
-│   ├── micro_features.py
-│   └── feature_engine.py
-├── models/             # ML training & prediction
-│   ├── train_model.py
-│   ├── predict.py
-│   └── model_registry.py
-├── risk/               # Risk management
-│   └── risk_manager.py
-├── strategy/           # Trading strategies & signals
-│   ├── regime_detector.py
-│   ├── signal_generator.py
-│   ├── options_flow_detector.py
-│   └── trade_scorer.py
-├── utils/              # Helpers & logging
-│   ├── logger.py
-│   └── helpers.py
-├── main.py             # Entry point
+├── backtest/               # Backtest engine + option resolver
+├── config/                 # Settings, constants
+├── dashboard/              # Next.js 15 retro terminal UI
+│   ├── app/                # Pages: /, /live, /trades, /charts, /backtest, /ai, /settings
+│   ├── components/         # Sidebar, StatCard, EquityChart, TradeTable, etc.
+│   └── lib/                # API client (fetchJSON/postJSON)
+├── data/                   # TrueData adapter, tick collector, aggregator
+│   └── historical/         # Stored option tick CSVs
+├── database/               # schema.sql + db.py (SQLAlchemy + psycopg2)
+├── execution/              # OrderManager + broker adapter (Kite Connect)
+├── features/               # indicators.py (80+ features), feature engine
+├── frontend/               # Flask API (app.py) — serves all /api/* routes
+├── models/                 # LightGBM + DQN training, prediction, strategy models
+├── risk/                   # Kelly sizer, risk manager
+├── scripts/                # All runnable scripts (backtest, train, paper trade)
+├── strategy/               # RegimeDetector, SignalGenerator, VolSurface, TradeScorer
+├── utils/                  # Logger, helpers
+├── main.py                 # Legacy entry point (mock/ingest/train/backtest/live)
 ├── requirements.txt
-└── README.md
+└── .env.example
 ```
 
 ---
 
-## 🔧 Technical Stack
+## Dashboard Pages
 
-- **Language**: Python 3.13+
-- **Database**: PostgreSQL + TimescaleDB
-- **ML Framework**: XGBoost, LightGBM, scikit-learn
-- **Data Processing**: pandas, NumPy
-- **Technical Analysis**: pandas-ta
-- **Broker API**: Kite Connect (Zerodha)
-- **Data Provider**: TrueData API
-
----
-
-## 📝 Development Roadmap
-
-- [x] Layer 1: Infrastructure (DB, config, logging)
-- [x] Layer 2: Data pipeline (TrueData, Kite, aggregation)
-- [x] Layer 3: Feature engineering (macro + micro)
-- [x] Layer 4: ML training & prediction (dual-model)
-- [x] Layer 5: Strategy execution & risk management
-- [ ] Layer 6: Dashboard & monitoring (Grafana/Streamlit)
-- [ ] Layer 7: Telegram alerts & notifications
-- [ ] Layer 8: Multi-symbol expansion (FINNIFTY, MIDCPNIFTY)
-- [ ] Layer 9: Advanced ML (LSTM, Transformers)
-- [ ] Layer 10: Portfolio optimization
+| Page | Route | Description |
+|---|---|---|
+| Dashboard | `/` | Live stats, equity curve, recent trades, ticker bar |
+| Live | `/live` | System status, market regime, trade suggestions |
+| Trades | `/trades` | Full trade history, P&L chart, strategy breakdown |
+| Charts | `/charts` | NIFTY candles, option chain, tick charts, analytics |
+| Backtest | `/backtest` | Run backtests, compare risk profiles, equity curves |
+| AI Models | `/ai` | RL agent status, model info, Kelly sizer |
+| Settings | `/settings` | Risk profile selection, system info, CLI reference |
 
 ---
 
-## ⚠️ Important Notes
+## Risk Management
 
-### Do NOT Train on Mock Data
-Mock data is synthetic noise with no real market patterns. Training ML models on it will produce garbage results. Always wait for real TrueData before running `python main.py train`.
-
-### Paper Trading First
-Before going live with real capital:
-1. Run backtests on historical data
-2. Test in paper trading mode (dry-run)
-3. Verify all components work end-to-end
-4. Start with small capital (₹10,000-₹25,000)
-
-### Market Hours
-System automatically checks market hours (9:15 AM - 3:30 PM IST). Outside market hours, the live loop sleeps.
+| Rule | Value |
+|---|---|
+| Risk per trade | 1% of capital |
+| Max trades/day | 3–5 (by profile) |
+| Max daily loss | 5% of capital |
+| Stop loss | ATR-based × profile multiplier |
+| Target | 2× stop loss |
+| Position sizing | Half-Kelly, min 1 lot, max 5 lots |
 
 ---
 
-## 🤝 Contributing
+## Data Requirements
 
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+| Type | Source | Stored |
+|---|---|---|
+| 1m NIFTY candles | TrueData | PostgreSQL `candles_1m` |
+| Options tick data | TrueData | PostgreSQL + `data/historical/` CSVs |
+| Option chain (live) | TrueData WebSocket | In-memory |
+| Trade execution | Kite Connect | PostgreSQL `trades` |
 
 ---
 
-## ⚖️ Disclaimer
+## Important Notes
 
-**This software is for educational purposes only.** Trading in derivatives involves substantial risk of loss. Past performance is not indicative of future results. The authors and contributors are not responsible for any financial losses incurred through the use of this software.
+**Do NOT train models on mock data** — synthetic data has no real market patterns and will produce useless models.
 
-**Always:**
-- Understand the risks before trading
-- Start with paper trading
-- Never risk more than you can afford to lose
-- Comply with all applicable regulations
+**Paper trade before going live:**
+1. Run `tick_replay_backtest.py` on historical data
+2. Verify results in the Backtest dashboard page
+3. Run `paper_trade.py` in replay mode for a few days
+4. Only then enable live order execution via Kite Connect
 
----
-
-## 📧 Contact
-
-For questions, issues, or collaboration:
-- Open an issue on GitHub
-- Email: your.email@example.com
+**Market hours:** System operates 9:15 AM – 3:30 PM IST. The scanner runs every 30s.
 
 ---
 
-## 🙏 Acknowledgments
+## License
 
-- **TrueData** for market data API
-- **Zerodha** for Kite Connect API
-- **TimescaleDB** for time-series database
-- **pandas-ta** for technical analysis library
+MIT — see [LICENSE](LICENSE)
 
 ---
 
-**Built with ❤️ for algorithmic traders**
+## Disclaimer
+
+For educational purposes only. Trading derivatives involves substantial risk of loss. Past backtest performance does not guarantee future results. Always paper trade first and never risk capital you cannot afford to lose.

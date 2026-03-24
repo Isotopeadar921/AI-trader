@@ -30,6 +30,28 @@ def write_df(df: pd.DataFrame, table: str, if_exists: str = "append"):
     df.to_sql(table, engine, if_exists=if_exists, index=False, method="multi")
 
 
+def upsert_candles(df: pd.DataFrame, table: str = "minute_candles"):
+    """Insert candles, ignoring rows that already exist (by timestamp+symbol)."""
+    if df.empty:
+        return 0
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy import Table, MetaData
+    meta = MetaData()
+    meta.reflect(bind=engine, only=[table])
+    tbl = meta.tables[table]
+    rows = df.to_dict(orient="records")
+    inserted = 0
+    with engine.begin() as conn:
+        for chunk_start in range(0, len(rows), 500):
+            chunk = rows[chunk_start:chunk_start + 500]
+            stmt = pg_insert(tbl).values(chunk).on_conflict_do_nothing(
+                index_elements=["timestamp", "symbol"]
+            )
+            result = conn.execute(stmt)
+            inserted += result.rowcount
+    return inserted
+
+
 def init_db():
     """Run the schema.sql to initialize all tables and hypertables."""
     import os

@@ -83,6 +83,7 @@ class TrueDataAdapter:
         self._stream_thread: Optional[threading.Thread] = None
         self._last_request_time: float = 0.0
         self._ws_metadata: Dict = {}  # segments, maxsymbols, validity, etc.
+        self._subscribed_symbols: List[str] = []  # tracked for auto-reconnect
 
     # ── Authentication (REST) ───────────────────────────────────────────────
 
@@ -532,6 +533,8 @@ class TrueDataAdapter:
             logger.error("WebSocket not connected. Call ws_connect() first.")
             return
 
+        # Track for reconnect
+        self._subscribed_symbols = list(symbols)
         msg = json.dumps({"method": "addsymbol", "symbols": symbols})
         self._ws.send(msg)
         logger.info(f"WebSocket subscribing to {len(symbols)} symbols: {symbols[:5]}{'...' if len(symbols) > 5 else ''}")
@@ -589,6 +592,10 @@ class TrueDataAdapter:
         self._streaming = True
 
         def _stream_loop():
+            reconnect_delay = 5   # seconds between reconnect attempts
+            max_reconnect_delay = 60
+            subscribed_symbols = list(self._subscribed_symbols) if hasattr(self, '_subscribed_symbols') else []
+
             while self._streaming:
                 try:
                     raw = self._ws.recv()
@@ -600,6 +607,7 @@ class TrueDataAdapter:
                     # Heartbeat
                     if isinstance(msg, dict) and msg.get("message") == "HeartBeat":
                         logger.debug(f"Heartbeat: {msg.get('timestamp')}")
+                        reconnect_delay = 5  # reset on successful heartbeat
                         continue
 
                     # Status/info messages
@@ -611,6 +619,7 @@ class TrueDataAdapter:
                     if isinstance(msg, list) and len(msg) >= 4:
                         tick = self._parse_ws_tick(msg)
                         if tick:
+                            reconnect_delay = 5  # reset on successful tick
                             for cb in self._callbacks:
                                 try:
                                     cb(tick)
@@ -620,11 +629,34 @@ class TrueDataAdapter:
                 except json.JSONDecodeError:
                     logger.debug(f"Non-JSON message: {raw[:100]}")
                 except Exception as e:
-                    if self._streaming:
-                        logger.error(f"WebSocket stream error: {e}")
-                        time.sleep(1)
-                    else:
+                    if not self._streaming:
                         break
+                    logger.error(f"WebSocket stream error: {e}")
+                    # ── Auto-reconnect ────────────────────────────────────
+                    logger.info(f"Attempting WebSocket reconnect in {reconnect_delay}s...")
+                    time.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+
+                    try:
+                        # Close old socket silently
+                        try:
+                            self._ws.close()
+                        except Exception:
+                            pass
+                        self._ws_connected = False
+
+                        # Reconnect
+                        if self.ws_connect():
+                            # Re-subscribe to same symbols
+                            subscribed_symbols = list(self._subscribed_symbols) if hasattr(self, '_subscribed_symbols') else []
+                            if subscribed_symbols:
+                                self.ws_subscribe(subscribed_symbols)
+                            logger.info(f"WebSocket reconnected, re-subscribed to {len(subscribed_symbols)} symbols.")
+                            reconnect_delay = 5  # reset delay on success
+                        else:
+                            logger.error("WebSocket reconnect failed, will retry...")
+                    except Exception as re:
+                        logger.error(f"Reconnect attempt failed: {re}")
 
         self._stream_thread = threading.Thread(target=_stream_loop, daemon=True)
         self._stream_thread.start()
